@@ -28,7 +28,7 @@ class BivariateNormal(MultiVariateNormal):
     two Normal(0, 1) Random Variables."""
 
     def __init__(
-        self, means: tuple[float] = [0, 0], var: tuple[float] = [1, 1]
+        self, means: tuple[float, float] = [0, 0], var: tuple[float, float] = [1, 1]
     ) -> None:
         """Precondition: means and var have exactly
         2 valid positive integers."""
@@ -68,11 +68,11 @@ class BivariateNormal(MultiVariateNormal):
         denom = 2 * np.pi * sigma1 * sigma2 * np.sqrt(1 - rho**2)
         exponent = -1 / (2 * (1 - rho**2)) * (z1**2 - 2 * rho * z1 * z2 + z2**2)
 
-        return round(np.exp(exponent) / denom, 4)
+        return np.exp(exponent) / denom
 
 
 def simulate_bivariate(
-    means: tuple[float] = (0, 0), var: tuple[float] = (1, 1), n: int = 1000
+    means: tuple[float] = (0, 0), var: tuple[float] = (1, 1), n: int = 5000
 ) -> None:
     """Plot <n> samples of a multivariate distributions of variances
     in <var> its respective mean in <means>.
@@ -81,10 +81,24 @@ def simulate_bivariate(
     """
     bm = BivariateNormal(means, var)
     samples = bm.sampling(n)
-    x, y = [sample[0] for sample in samples], [sample[1] for sample in samples]
-    plt.scatter(x, y)
-    plt.show()
+    x1, y1 = [sample[0] for sample in samples], [sample[1] for sample in samples]
+    plt.scatter(x1, y1, s=2)
+
+
+def simulate_bivariate_pdf(
+    means: tuple[float] = (0, 0), var: tuple[float] = (1, 1), n: int = 1000
+) -> None:
+    """Plot the joined PDF of the two normal distributions constructed
+    from <means> and <var> on [-3, 3]."""
+    bm = BivariateNormal(means, var)
+    x2 = np.linspace(-2, 2, 100)
+    y2 = np.linspace(-2, 2, 100)
+    x, y = np.meshgrid(x2, y2)  # grid
+    probabilities = bm.pdf(x, y)
+    plt.contour(x, y, probabilities)
 
 
 if __name__ == "__main__":
     simulate_bivariate()
+    simulate_bivariate_pdf()
+    plt.show()
