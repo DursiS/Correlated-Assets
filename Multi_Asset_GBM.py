@@ -18,6 +18,7 @@ class AssetGBM:
         weight: float,
         name: str,
         dt: float,
+        price: float,
         mu: float = 0,
         sigma: float = 1,
     ) -> None:
@@ -30,18 +31,20 @@ class AssetGBM:
         self.dt = dt
         self.mu = mu
         self.sigma = sigma
-        self.path = [(0, 1)]
+        self.path = [(0, price)]
+        self.start_price = price
 
     def step(self, z: float) -> float:
         """Take a step forward with fixed noise, <noise>.
         As well as return newest height."""
-        step_factor = np.exp(
+        price = float(self.path[-1][1])
+        price *= np.exp(
             (self.mu - (1 / 2) * (self.sigma**2)) * self.dt
             + self.sigma * np.sqrt(self.dt) * z
         )
-        new_pos = self.path[-1][0] * step_factor
-        self.path.append((self.path[-1][0] + self.dt, new_pos))
-        return new_pos
+        new_pos = self.path[-1][0] + self.dt, price
+        self.path.append(new_pos)
+        return price
 
     def simulate_paths(
         self, time: float = 1, n: int = 1
@@ -80,25 +83,32 @@ class MultiAssetGBM:
     path: list[tuple[float, float]]
     _assets: list[AssetGBM]
 
-    def __init__(self, dt: float) -> None:
+    def __init__(self, dt: float, assets: list[AssetGBM]) -> None:
         """Create a new MultiAssetGBM.
 
         Precondition: dt > 0
         """
         self.dt = dt
-        self.path = [(0, 1)]
         self._assets = []
 
-    def add_asset(self, ticker: str, weight: float, mu: float, sigma: float) -> bool:
+        sum = 0
+        for asset in assets:
+            self.add_asset(asset)
+            sum += asset.start_price * asset.weight
+
+        self.path = [(0, sum)]
+
+    def add_asset(self, asset: AssetGBM) -> bool:
         """Return True if this ticker is not already an asset
         and the weight was valid. Otherwise, do nothing and return False.
 
         Precondition: <ticker> is a valid stock ticker and weight > 0.
+        And all assets are to be added at the same time to begin.
         """
-        if weight <= 0 or ticker in self._assets:
+        if asset.weight <= 0 or asset.name in self._assets:
             return False
         else:
-            self._assets.append(AssetGBM(weight, ticker, mu, sigma))
+            self._assets.append(asset)
             return True
 
     def step(self) -> None:
@@ -110,7 +120,7 @@ class MultiAssetGBM:
         new_pos = 0
         for i in range(len(self._assets)):
             asset = self._assets[i]
-            new_pos += asset.step(z[i])
+            new_pos += asset.step(z[i]) * asset.weight
 
         self.path.append((self.path[-1][0] + self.dt, new_pos))
 
@@ -162,9 +172,57 @@ class MultiAssetGBM:
             matrix.append(self._corr_row(i))
         return matrix
 
+    def get_returns(self) -> float:
+        """Return PNL of these assets
+
+        Precondition: No assets were added between the first and last
+        points of the path.
+        """
+        return round(self.path[-1][1] - self.path[0][1], 2)
+
+    def print_returns(self) -> None:
+        """Print an overview of realized returns."""
+        start = self.path[0][1]
+        end = round(self.path[-1][1], 2)
+        returns = self.get_returns()
+        pnlp = round(returns / start, 2) * 100
+        print(f"Start$: {start}, End$: {end}, PNL: {returns}, PNL%: {pnlp}%")
+
+    def get_var95(self) -> float:
+        """Return VaR for 1 year.
+
+        Var = E(X1 X2 X3 X4...)  E(X1)*E(X2)*E(X3)...
+        """
+        prices = np.array([point[1] for point in self.path])
+        starting_price = self.path[0][1]
+        return np.percentile(prices - starting_price, 95)
+
+    def get_expected_shortfall(self) -> float:
+        """Return the expected shortfall of the path so far."""
+        prices = np.array([point[1] for point in self.path])
+        starting_price = self.path[0][1]
+        returns = prices - starting_price
+        worst_loses = returns[returns < self.get_var95()]
+        return worst_loses.mean()
+
+    def print_risk(self) -> None:
+        """Print var95 and ES."""
+        var95 = round(self.get_var95(), 2)
+        es = round(self.get_expected_shortfall(), 2)
+        print(f"VaR: {var95}, Expected Shortfall: {es}")
+
+    def get_realized_volatility(self) -> float:
+        """Return the volatility of this portfolio of the path so far."""
+        prices = np.array([point[1] for point in self.path])
+        return prices.std()
+
+    def print_volatility(self) -> None:
+        """Print realized volatility so far."""
+        rv = round(self.get_realized_volatility(), 2)
+        print(f"RV% {rv}%")
+
     def visualize(self) -> None:
         """Visualize the path of this MultiAssetGBM."""
-        print(self.path)
         x = [point[0] for point in self.path]
         y = np.array([point[1] for point in self.path])
         plt.plot(x, y.flatten())
@@ -174,9 +232,22 @@ class MultiAssetGBM:
 
 
 if __name__ == "__main__":
-    ma = MultiAssetGBM(1 / 252)
-    ma.add_asset("test1", 1, 0.08, 0.125)
-    ma.add_asset("test2", 0.5, 0.08, 0.1)
-    ma.add_asset("test3", 0.25, 0.08, 0.15)
-    ma.run(1000)
+    dt = 1 / 252
+
+    asset1 = AssetGBM(1, "test1", dt, 250, 0.08, 0.25)
+    asset2 = AssetGBM(1 / 2, "test2", dt, 150, 0.14, 0.3)
+    asset3 = AssetGBM(1 / 3, "test3", dt, 300, 0.11, 0.4)
+    asset4 = AssetGBM(1 / 2, "test1", dt, 250, 0.08, 0.25)
+    asset5 = AssetGBM(1, "test1", dt, 150, 0.14, 0.3)
+    asset6 = AssetGBM(1 / 2, "test1", dt, 300, 0.11, 0.4)
+
+    bucket2 = [asset1, asset2, asset3, asset4, asset5, asset6]
+    bucket1 = [asset1, asset2, asset3]
+
+    ma = MultiAssetGBM(dt, bucket2)
+
+    ma.run(100)
+    ma.print_returns()
+    ma.print_risk()
+    ma.print_volatility()
     ma.visualize()
